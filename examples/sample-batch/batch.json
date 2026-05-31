@@ -1,0 +1,48 @@
+{
+  "id": "sample-week",
+  "timezone": "America/Los_Angeles",
+  "accounts": {
+    "linkedin": { "displayName": "Your Name" },
+    "x": { "handle": "@your_handle" }
+  },
+  "posts": [
+    {
+      "id": "x-single",
+      "platform": "x",
+      "kind": "image",
+      "textFile": "posts/x-single.md",
+      "assets": ["assets/x-image.png"],
+      "scheduledAt": "2026-06-09 08:00"
+    },
+    {
+      "id": "li-image",
+      "platform": "linkedin",
+      "kind": "image",
+      "textFile": "posts/li-image.md",
+      "assets": ["assets/li-image.png"],
+      "scheduledAt": "2026-06-09 09:00"
+    },
+    {
+      "id": "x-carousel",
+      "platform": "x",
+      "kind": "carousel",
+      "textFile": "posts/x-carousel.md",
+      "assets": [
+        "assets/x-1.png",
+        "assets/x-2.png",
+        "assets/x-3.png",
+        "assets/x-4.png"
+      ],
+      "scheduledAt": "2026-06-10 17:00"
+    },
+    {
+      "id": "li-doc",
+      "platform": "linkedin",
+      "kind": "document",
+      "title": "A 3-slide teardown",
+      "textFile": "posts/li-doc.md",
+      "assets": ["assets/li-doc.pdf"],
+      "scheduledAt": "2026-06-11 09:00"
+    }
+  ]
+}
