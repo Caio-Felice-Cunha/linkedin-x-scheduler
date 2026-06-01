@@ -160,6 +160,13 @@ async function run() {
     assert.ok(!config.isValidBatchId('a/b'));
     assert.ok(!config.isValidBatchId(''));
   });
+  await test('config.batchWorkDir keys on the batch id (no cross-batch collision)', () => {
+    const a = config.batchWorkDir('/tmp/wk', 'launch');
+    const b = config.batchWorkDir('/tmp/wk', 'news');
+    assert.ok(a.endsWith(path.join('.scheduler', 'launch')), `got ${a}`);
+    assert.notStrictEqual(a, b, 'different ids must get different work dirs');
+    assert.ok(config.batchWorkDir('/tmp/wk', 'a/b').endsWith('.scheduler'), 'bad id falls back to flat');
+  });
 
   // ---------------- manifest ----------------
   await test('loadManifest: valid sample → correct templates + resolved assets', () => {

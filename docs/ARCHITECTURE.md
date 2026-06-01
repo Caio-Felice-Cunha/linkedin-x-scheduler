@@ -115,7 +115,8 @@ idempotent (a post already at the target time is skipped). X-only for now.
 
 ## Working directory
 
-All runtime artifacts for a batch live in `<batch-dir>/.scheduler/`:
+All runtime artifacts for a batch live in `<batch-dir>/.scheduler/<id>/` (keyed by
+the manifest `id`, so two manifests in one directory never share state):
 `schedule-state.json` (resume), `schedule-runlog.md`, `schedule-report.md`,
 `scheduler-logs/*.png`. Delete it to re-seed from a changed manifest. It is
 gitignored.

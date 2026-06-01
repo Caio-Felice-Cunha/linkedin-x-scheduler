@@ -135,11 +135,29 @@ function screenshotDir() {
   return path.join(WORK_DIR, 'scheduler-logs');
 }
 
+/**
+ * Resolve a batch's working directory: `<batchDir>/.scheduler/<batchId>/`.
+ *
+ * Keying on the batch id (not just the batch directory) keeps two different
+ * `batch.json` files in the SAME directory from sharing one `.scheduler/` and
+ * loading each other's stale resume state. Falls back to a flat `.scheduler/`
+ * if no usable id is given.
+ *
+ * @param {string} batchDir - the directory containing the manifest
+ * @param {string} batchId - the manifest's id
+ * @returns {string} the absolute working directory for this batch
+ */
+function batchWorkDir(batchDir, batchId) {
+  const base = path.join(batchDir, '.scheduler');
+  return isValidBatchId(batchId) ? path.join(base, batchId) : base;
+}
+
 module.exports = {
   DEFAULT_CDP_ENDPOINT,
   DEFAULT_MAX_RETRIES,
   setWorkDir,
   workDir,
+  batchWorkDir,
   buildConfig,
   isValidBatchId,
   stateFilePath,

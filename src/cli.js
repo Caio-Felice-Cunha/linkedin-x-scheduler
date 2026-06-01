@@ -155,7 +155,7 @@ async function handleRun(opts) {
   }
 
   // 2. Working directory: <batch-dir>/.scheduler/ holds state + logs + report.
-  const workDir = path.join(manifest.batchDir, '.scheduler');
+  const workDir = config.batchWorkDir(manifest.batchDir, manifest.batchId);
   try {
     fs.mkdirSync(workDir, { recursive: true });
   } catch (error) {
@@ -276,7 +276,7 @@ async function handleReschedule(opts) {
     return EXIT.VALIDATION_FAILURE;
   }
 
-  const workDir = path.join(manifest.batchDir, '.scheduler');
+  const workDir = config.batchWorkDir(manifest.batchDir, manifest.batchId);
   try {
     fs.mkdirSync(workDir, { recursive: true });
   } catch (error) {

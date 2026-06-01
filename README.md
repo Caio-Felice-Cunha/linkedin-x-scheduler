@@ -101,7 +101,7 @@ npm run gen-sample          # creates placeholder images/PDF for the example
 node src/cli.js --batch examples/sample-batch --dry-run
 ```
 
-Read the report it prints (and `examples/sample-batch/.scheduler/schedule-report.md`).
+Read the report it prints (and `examples/sample-batch/.scheduler/sample-week/schedule-report.md`).
 
 ### 4. Make your own batch and go live
 
@@ -193,7 +193,7 @@ Then **double-check both scheduled queues** in your browser (see the
 - **No credentials, ever.** It attaches to your session; it cannot see or enter
   your password.
 - **Read-only on your content.** It only writes a working dir
-  (`<batch>/.scheduler/`: state, run-log, report, screenshots).
+  (`<batch>/.scheduler/<id>/`: state, run-log, report, screenshots).
 
 ---
 

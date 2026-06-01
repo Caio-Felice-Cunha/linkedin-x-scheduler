@@ -79,7 +79,7 @@ Count them; match every date/time. Anything missing → Step 5.
 - **Over-limit X post** → trim the text, then re-run that post.
 - **Missing from queue** (despite a `verified`) → delete `./my-week/.scheduler/`
   (or reset that post's `status` to `pending` in
-  `./my-week/.scheduler/schedule-state.json`) and re-run it.
+  `./my-week/.scheduler/<id>/schedule-state.json`) and re-run it.
 - **`ERR_NAME_NOT_RESOLVED` / transient** → just re-run.
 - **Logged out / 2FA** → log in manually in the debuggable Chrome window, re-run.
 
