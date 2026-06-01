@@ -40,6 +40,7 @@ src/
   state.js        # schedule-state.json: state machine + resume + persistence
   core.js         # shared run context; CDP connect; retry/verify; reconcile
   orchestrator.js # batch order, per-post loop, abort/report
+  reschedule.js   # change existing X posts' times in place (no delete/recreate)
   connect.js      # chromium.connectOverCDP attach + optional login-name guard
   helpers.js      # date/label formatting, withRetry, verify-with-poll, firstLine
   runlog.js       # append-only schedule-runlog.md
@@ -92,6 +93,25 @@ Register the adapter in `orchestrator.js`'s `adapterFor(post)` and add the
 - **Duplicate-safe:** never re-take the terminal action on an inconclusive
   verify — report `scheduled-unverified` instead.
 - **Read-only** on the user's content; write only the working directory.
+
+## Rescheduling (X)
+
+The `reschedule` command (`reschedule.js` + `XAdapter.reschedulePost`) changes an
+existing post's time without deleting/recreating it. Flow:
+
+1. `gotoScheduledQueue` → the X scheduled queue.
+2. `openScheduledPost(page, firstLine)` finds the post by its first line (emoji +
+   curly-quote normalized; requires EXACTLY ONE match, else it refuses) and opens
+   it in the edit composer.
+3. It then reuses the **same** schedule machinery as creating a post —
+   `openScheduleControl` → `setSchedule` → `confirmScheduledMode` (G3) →
+   `performScheduleAction` → `waitForScheduleEffect` — to set the new time and
+   save via the "Schedule" button.
+4. Verifies the new "Will send on …" time in the queue.
+
+Editing in place keeps the queue count unchanged (no duplicate). Dry-run sets +
+verifies the new time in the overlay, then closes without saving. It is
+idempotent (a post already at the target time is skipped). X-only for now.
 
 ## Working directory
 

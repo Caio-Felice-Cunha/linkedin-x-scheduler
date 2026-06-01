@@ -103,6 +103,8 @@ async function run() {
   const packets = require('../src/packets');
   const { Orchestrator } = require('../src/orchestrator');
   const { LivePublishError } = require('../src/platforms/linkedin');
+  const { XAdapter } = require('../src/platforms/x');
+  const { runReschedule } = require('../src/reschedule');
 
   // ---------------- helpers ----------------
   await test('formatDateMDY → M/D/YYYY', () => {
@@ -137,7 +139,7 @@ async function run() {
   // ---------------- config ----------------
   await test('config.buildConfig defaults + overrides', () => {
     const c = config.buildConfig();
-    assert.strictEqual(c.cdpEndpoint, 'http://localhost:9222');
+    assert.strictEqual(c.cdpEndpoint, 'http://127.0.0.1:9222');
     assert.strictEqual(c.maxRetries, 2);
     const c2 = config.buildConfig({ cdpEndpoint: 'http://x:1', maxRetries: 5, accounts: { x: { handle: '@a' } } });
     assert.strictEqual(c2.cdpEndpoint, 'http://x:1');
@@ -342,6 +344,46 @@ async function run() {
       const result = await orch.run();
       assert.strictEqual(result.report.mode, 'dry-run');
       assert.strictEqual(result.report.posts.length, 4);
+    } finally { fx.cleanup(); }
+  });
+
+  // ---------------- reschedule (X-only, in place) ----------------
+  await test('X normalizeForMatch strips emoji + folds curly quotes', () => {
+    const x = new XAdapter({ config: {}, runLog: { append() {} } });
+    assert.strictEqual(x.normalizeForMatch('Hello 👇 world'), 'Hello world');
+    assert.strictEqual(x.normalizeForMatch('you’ve “shipped”'), 'you\'ve "shipped"');
+  });
+  await test('runReschedule: X posts handled, LinkedIn skipped', async () => {
+    const fx = makeBatchFixture();
+    try {
+      const core = buildCore(fx, 'live');
+      core.assertLoggedIn = async () => ({ loggedIn: true });
+      const calls = [];
+      const xStub = { reschedulePost: async (p) => { calls.push(p.postId); return { postId: p.postId, status: 'verified', scheduledLocalTime: 'x' }; } };
+      const packets = [
+        { postId: 'x-img', platform: 'x', target: '2026-06-01 09:00', firstLine: 'X single first line.' },
+        { postId: 'li-img', platform: 'linkedin', target: '2026-06-01 09:00', firstLine: 'LI first line.' },
+      ];
+      const res = await runReschedule({ core, packets }, { connectFn: async () => ({ browser: {}, context: {}, page: makePage() }), xAdapter: xStub });
+      assert.deepStrictEqual(calls, ['x-img'], 'only the X post is rescheduled');
+      assert.strictEqual(res.outcome, 'complete');
+      assert.strictEqual(res.results.find((r) => r.postId === 'li-img').status, 'skipped');
+    } finally { fx.cleanup(); }
+  });
+  await test('runReschedule: a G3 live-publish aborts the remaining X posts', async () => {
+    const fx = makeBatchFixture();
+    try {
+      const core = buildCore(fx, 'live');
+      core.assertLoggedIn = async () => ({ loggedIn: true });
+      const calls = [];
+      const xStub = { reschedulePost: async (p) => { calls.push(p.postId); if (p.postId === 'a') throw new LivePublishError('a', 'feed publish'); return { postId: p.postId, status: 'verified' }; } };
+      const packets = [
+        { postId: 'a', platform: 'x', target: '2026-06-01 09:00', firstLine: 'aaaaaaaa' },
+        { postId: 'b', platform: 'x', target: '2026-06-02 09:00', firstLine: 'bbbbbbbb' },
+      ];
+      const res = await runReschedule({ core, packets }, { connectFn: async () => ({ browser: {}, context: {}, page: makePage() }), xAdapter: xStub });
+      assert.strictEqual(res.outcome, 'aborted');
+      assert.deepStrictEqual(calls, ['a'], 'second post not attempted after G3 abort');
     } finally { fx.cleanup(); }
   });
 

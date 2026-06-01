@@ -203,7 +203,24 @@ Then **double-check both scheduled queues** in your browser (see the
 node src/cli.js --batch <path> [--dry-run | --live] [--only <id>] [--cdp <url>] [--json]
 node src/cli.js connect-check          # verify the CDP attach
 node src/cli.js dry-run --batch <path> # force a rehearsal
+node src/cli.js reschedule --batch <path> --live  # move existing X posts to new times (in place)
 ```
+
+### Rescheduling existing posts (X)
+
+Already scheduled a batch and want to shift the times? Edit the `scheduledAt`
+values in your `batch.json`, then run **`reschedule`**. It finds each post in your
+live X queue by its first line, opens it, and changes only the time. It edits in
+place (no delete, no re-create, so no duplicates), is dry-run by default, and is
+G3-safe (it only saves via the "Schedule" button, never "Post").
+
+```bash
+node src/cli.js reschedule --batch ./my-week --dry-run   # preview (sets + verifies, saves nothing)
+node src/cli.js reschedule --batch ./my-week --live      # apply the new times
+```
+
+Match-by-first-line means the post text in `batch.json` must still match what's
+in your queue. Reschedule is **X-only** today (LinkedIn is on the roadmap).
 
 | Flag | Meaning |
 |---|---|

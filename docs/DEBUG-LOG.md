@@ -17,6 +17,8 @@ something weird, read this first — most surprises are already here.
 | A2 | Upload helper **rejected the file path** | Browser upload tooling restricts which paths it accepts | Drive the page's `<input type=file>` directly via Playwright `setInputFiles` — **no native dialog** | adapters |
 | A3 | Native "Open" dialog **orphaned → desktop locked** | Clicking the media button opens the OS chooser; setting the input afterward leaves the modal chooser open | Use the **filechooser event** (`page.waitForEvent('filechooser')` then `chooser.setFiles`) or set the hidden input directly — never click-then-race | `platforms/linkedin.js` |
 | A4 | Debug port unreachable | Recent Chrome **ignores `--remote-debugging-port` on the default profile** | Launch a **dedicated `--user-data-dir`** and log in there once | README / PLAYBOOK |
+| A5 | Port up in a browser but `connectOverCDP` refuses (`ECONNREFUSED ::1:9222`) | `localhost` resolved to IPv6 `::1` while Chrome binds the port on IPv4 | Connect to `127.0.0.1:9222`, not `localhost` (now the default endpoint) | `config.js` |
+| A6 | Relaunching Chrome with the flag still doesn't bind the port | A Chrome already running for that profile is reused and the flag is silently ignored | Use a SEPARATE `--user-data-dir` — it starts its own instance and binds the port even alongside your normal Chrome | PLAYBOOK |
 
 ## B. LinkedIn adapter
 

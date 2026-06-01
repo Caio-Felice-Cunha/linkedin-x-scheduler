@@ -20,7 +20,9 @@ const path = require('path');
  * The operator launches Chrome with `--remote-debugging-port=9222`; the
  * scheduler attaches here — it never launches a browser.
  */
-const DEFAULT_CDP_ENDPOINT = 'http://localhost:9222';
+// 127.0.0.1 (not "localhost"): on some systems localhost resolves to IPv6 ::1
+// while Chrome binds the debug port on IPv4, which refuses the connection.
+const DEFAULT_CDP_ENDPOINT = 'http://127.0.0.1:9222';
 
 /** Bounded-retry ceiling: max retries per step, then stop and report. */
 const DEFAULT_MAX_RETRIES = 2;

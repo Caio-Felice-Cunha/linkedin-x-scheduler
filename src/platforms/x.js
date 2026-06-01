@@ -993,6 +993,212 @@ class XAdapter {
       return false;
     }
   }
+
+  /**
+   * Normalize text for matching a scheduled post by its first line: strip emoji
+   * (X renders them as Twemoji <img>, so innerText drops the char) and fold
+   * curly quotes/apostrophes to straight. Mirrors queueContains' matching.
+   *
+   * @param {string} s - raw text
+   * @returns {string} normalized text
+   */
+  normalizeForMatch(s) {
+    return String(s)
+      .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+      .replace(/[‘’‛′]/g, "'")
+      .replace(/[“”″]/g, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
+   * Navigate to X's scheduled-posts queue (home-first reset + one retry on a
+   * stuck same-URL navigation, same as queueContains).
+   *
+   * @param {object} page - the connected Playwright Page
+   * @returns {Promise<boolean>} true iff the queue navigation landed
+   */
+  async gotoScheduledQueue(page) {
+    const go = async () => {
+      try {
+        await page.goto('https://x.com/compose/post/unsent/scheduled', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        return true;
+      } catch (error) {
+        void error;
+        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded' }).catch(() => {});
+        await helpers.sleep(1200);
+        try {
+          await page.goto('https://x.com/compose/post/unsent/scheduled', { waitUntil: 'domcontentloaded', timeout: 20000 });
+          return true;
+        } catch (error2) {
+          void error2;
+          return false;
+        }
+      }
+    };
+    const ok = await go();
+    await helpers.sleep(2500);
+    return ok;
+  }
+
+  /**
+   * Return the "Will send on …" line of the scheduled post whose first line
+   * matches `firstLine`, or null. Caller must already be on the scheduled queue.
+   *
+   * @param {object} page - the connected Playwright Page
+   * @param {string} firstLine - the post's first line
+   * @returns {Promise<?string>}
+   */
+  async scheduledTimeFor(page, firstLine) {
+    const needle = this.normalizeForMatch(firstLine).slice(0, 30);
+    if (needle.length < 8) {
+      return null;
+    }
+    return page.evaluate((nd) => {
+      const norm = (t) => String(t)
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+        .replace(/[‘’‛′]/g, "'").replace(/[“”″]/g, '"').replace(/\s+/g, ' ').trim();
+      const btns = Array.from(document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"]'))
+        .filter((b) => /will send on/i.test(b.innerText || ''));
+      const m = btns.find((b) => norm(b.innerText || '').includes(nd));
+      return m ? ((m.innerText || '').split('\n').find((l) => /will send on/i.test(l)) || '').trim() : null;
+    }, needle);
+  }
+
+  /**
+   * Open a scheduled post for editing by matching its first line in the queue.
+   * Requires EXACTLY ONE match (refuses on 0 or >1, to never edit the wrong
+   * post), then waits for the edit composer (its "Schedule" button + editor).
+   *
+   * @param {object} page - the connected Playwright Page
+   * @param {string} firstLine - the post's first line
+   * @returns {Promise<{ok:boolean, reason?:string}>}
+   */
+  async openScheduledPost(page, firstLine) {
+    const needle = this.normalizeForMatch(firstLine).slice(0, 30);
+    if (needle.length < 8) {
+      return { ok: false, reason: 'first line too short to match safely' };
+    }
+    const clicked = await page.evaluate((nd) => {
+      const norm = (t) => String(t)
+        .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
+        .replace(/[‘’‛′]/g, "'").replace(/[“”″]/g, '"').replace(/\s+/g, ' ').trim();
+      const btns = Array.from(document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"]'))
+        .filter((b) => /will send on/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')));
+      const matches = btns.filter((b) => norm(b.innerText || '').includes(nd));
+      if (matches.length === 0) return 'not-found';
+      if (matches.length > 1) return 'ambiguous(' + matches.length + ')';
+      matches[0].click();
+      return 'ok';
+    }, needle);
+    if (clicked !== 'ok') {
+      return { ok: false, reason: clicked };
+    }
+    try {
+      await page.waitForFunction(
+        () => !!document.querySelector('[role="dialog"] [data-testid="tweetButton"]') &&
+              !!document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]'),
+        { timeout: this.core.config.stepTimeoutMs }
+      );
+    } catch (error) {
+      void error;
+      return { ok: false, reason: 'edit composer did not open' };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Close the edit composer WITHOUT saving (discards an un-saved time change).
+   * Used by the dry-run path and on error recovery.
+   *
+   * @param {object} page - the connected Playwright Page
+   * @returns {Promise<void>}
+   */
+  async closeComposer(page) {
+    await page.evaluate(() => {
+      const x = document.querySelector('[data-testid="app-bar-close"]');
+      if (x) x.click();
+    }).catch(() => {});
+    await helpers.sleep(800);
+    // Dismiss a "Discard changes?" confirmation if X shows one.
+    await page.evaluate(() => {
+      const d = Array.from(document.querySelectorAll('button,[role="button"]')).find(
+        (b) => /^discard$/i.test((b.innerText || '').trim()) || b.getAttribute('data-testid') === 'confirmationSheetConfirm'
+      );
+      if (d) d.click();
+    }).catch(() => {});
+    await helpers.sleep(700);
+  }
+
+  /**
+   * Change the scheduled TIME of an EXISTING X post in place (no delete, no
+   * re-create). Finds the post by its first line in the scheduled queue, opens
+   * it, and reuses the schedule overlay to set `packet.target`. Editing in place
+   * keeps the queue count unchanged (no duplicate).
+   *
+   * Honors dry-run (sets + verifies the new time in the overlay, then closes
+   * without saving). G3-safe: confirmScheduledMode refuses to take the terminal
+   * action unless the compose button reads "Schedule".
+   *
+   * @param {object} packet - { postId, target ("YYYY-MM-DD HH:mm"), firstLine }
+   * @returns {Promise<{postId:string, status:string, scheduledLocalTime:string, reason?:string}>}
+   * @throws {LivePublishError} on a G3 live-publish detection
+   */
+  async reschedulePost(packet) {
+    const { core } = this;
+    const page = core.page;
+    const { postId } = packet;
+    const parts = helpers.parsePacificTarget(packet.target);
+    const time12 = helpers.formatTime12h(parts);
+    const expected = `${helpers.MONTH_ABBR[parts.month]} ${parts.day}, ${parts.year} at ${time12}`;
+    const newLabel = helpers.pacificLabel(packet.target);
+    const log = core.runLog;
+    log.append({ postId, action: 'x-reschedule-start', detail: newLabel });
+
+    if (!(await this.gotoScheduledQueue(page))) {
+      return { postId, status: 'failed', scheduledLocalTime: newLabel, reason: 'could not open scheduled queue' };
+    }
+
+    // Idempotent: already at the target time? skip (so a re-run is harmless).
+    const current = await this.scheduledTimeFor(page, packet.firstLine);
+    if (current && current.includes(expected)) {
+      log.append({ postId, action: 'x-reschedule', result: 'skip', detail: 'already at target' });
+      return { postId, status: 'verified', scheduledLocalTime: newLabel };
+    }
+
+    const opened = await this.openScheduledPost(page, packet.firstLine);
+    if (!opened.ok) {
+      return { postId, status: 'failed', scheduledLocalTime: newLabel, reason: 'open: ' + opened.reason };
+    }
+    const ctrl = await this.openScheduleControl(page, postId);
+    if (!ctrl) {
+      await this.closeComposer(page);
+      return { postId, status: 'failed', scheduledLocalTime: newLabel, reason: 'schedule control absent' };
+    }
+    await core.withRetry(() => this.setSchedule(page, packet.target, postId), 'x-reschedule-set', postId);
+    await core.screenshot('x-reschedule-set', postId);
+
+    if (core.isDryRun) {
+      await this.closeComposer(page);
+      log.append({ postId, action: 'x-reschedule', result: 'DRY-RUN', detail: 'time set in overlay, not saved' });
+      return { postId, status: 'dry-run-ok', scheduledLocalTime: newLabel };
+    }
+
+    await core.withRetry(() => this.confirmScheduledMode(page, postId), 'x-reschedule-g3', postId);
+    await this.performScheduleAction(page);
+    const liveSignal = await this.detectLivePublish(page);
+    if (liveSignal) {
+      throw new LivePublishError(postId, liveSignal);
+    }
+    await this.waitForScheduleEffect(page);
+    await helpers.sleep(1500);
+
+    await this.gotoScheduledQueue(page);
+    const after = await this.scheduledTimeFor(page, packet.firstLine);
+    const ok = Boolean(after && after.includes(expected));
+    log.append({ postId, action: 'x-reschedule', result: ok ? 'verified' : 'unconfirmed', detail: after || '(not found)' });
+    return { postId, status: ok ? 'verified' : 'scheduled-unverified', scheduledLocalTime: newLabel };
+  }
 }
 
 module.exports = { XAdapter, NEEDS_LIVE_VALIDATION, X_EDITOR_SELECTORS };

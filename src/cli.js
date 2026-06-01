@@ -29,6 +29,8 @@ const { Orchestrator, MODE } = require('./orchestrator');
 const { SchedulerCore } = require('./core');
 const { loadManifest } = require('./manifest');
 const { ScheduleState } = require('./state');
+const { runReschedule } = require('./reschedule');
+const helpers = require('./helpers');
 const connect = require('./connect');
 const config = require('./config');
 
@@ -39,6 +41,7 @@ const EXIT = Object.freeze({ SUCCESS: 0, VALIDATION_FAILURE: 1, TOOLCHAIN_ERROR:
 const COMMANDS = Object.freeze({
   run: "Schedule a batch (LIVE only with --live; dry-run otherwise).",
   'dry-run': 'Rehearse a batch with the terminal Schedule click stubbed.',
+  reschedule: "Change existing X posts' times in place to the manifest's scheduledAt (X only; --live to save).",
   'connect-check': 'Attach to the running Chrome over CDP and report (no scheduling).',
   doctor: 'Environment + CDP connectivity summary (no scheduling).',
 });
@@ -124,7 +127,7 @@ function printHelp() {
   lines.push('  --dry-run          Rehearse — stub the terminal Schedule click (DEFAULT, safe).');
   lines.push('  --live             Arm the terminal Schedule click (real scheduling).');
   lines.push('  --only <postId>    Restrict the run to a single post.');
-  lines.push('  --cdp <url>        CDP endpoint (default http://localhost:9222).');
+  lines.push('  --cdp <url>        CDP endpoint (default http://127.0.0.1:9222).');
   lines.push('  --json             Emit the structured report as JSON.');
   lines.push('  --no-screenshots   Disable per-step screenshots.');
   lines.push('');
@@ -256,6 +259,100 @@ async function handleConnectCheck(opts) {
 }
 
 /**
+ * Handle `reschedule` — change existing X posts' times in place to the
+ * manifest's scheduledAt (X only). Dry-run unless --live.
+ *
+ * @param {object} opts - parsed args
+ * @returns {Promise<number>} exit code
+ */
+async function handleReschedule(opts) {
+  const batchArg = opts.batch || 'batch.json';
+
+  let manifest;
+  try {
+    manifest = loadManifest(batchArg);
+  } catch (error) {
+    process.stderr.write(`Error: ${error.message}\n`);
+    return EXIT.VALIDATION_FAILURE;
+  }
+
+  const workDir = path.join(manifest.batchDir, '.scheduler');
+  try {
+    fs.mkdirSync(workDir, { recursive: true });
+  } catch (error) {
+    process.stderr.write(`Error: cannot create working dir ${workDir}: ${error.message}\n`);
+    return EXIT.TOOLCHAIN_ERROR;
+  }
+  config.setWorkDir(workDir);
+  const stateFile = config.stateFilePath();
+  if (!fs.existsSync(stateFile)) {
+    try {
+      ScheduleState.fromManifest(manifest, stateFile);
+    } catch (error) {
+      process.stderr.write(`Error: cannot seed state: ${error.message}\n`);
+      return EXIT.TOOLCHAIN_ERROR;
+    }
+  }
+
+  let core;
+  try {
+    const cfg = {};
+    if (opts.cdp) cfg.cdpEndpoint = opts.cdp;
+    if (manifest.accounts) cfg.accounts = manifest.accounts;
+    core = new SchedulerCore({ week: manifest.batchId, mode: opts.mode, screenshots: opts.screenshots, config: cfg });
+  } catch (error) {
+    process.stderr.write(`Error: ${error.message}\n`);
+    return EXIT.VALIDATION_FAILURE;
+  }
+
+  // Each post is matched in the live queue by its first line; scheduledAt is the
+  // NEW desired time.
+  const packets = manifest.posts.map((p) => ({
+    postId: p.postId,
+    platform: p.platform,
+    target: p.target,
+    firstLine: helpers.firstLine(p.postText),
+  }));
+  if (opts.only && !packets.find((p) => p.postId === opts.only)) {
+    process.stderr.write(`Error: --only ${opts.only} is not a post id in this batch.\n`);
+    return EXIT.VALIDATION_FAILURE;
+  }
+
+  let result;
+  try {
+    result = await runReschedule({ core, packets, only: opts.only || null });
+  } catch (error) {
+    process.stderr.write(`Reschedule error: ${error.message}\n`);
+    return EXIT.TOOLCHAIN_ERROR;
+  }
+
+  if (opts.jsonMode) {
+    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  } else {
+    const lines = [
+      `# Reschedule report — ${manifest.batchId}`,
+      '',
+      `- Mode: **${core.isDryRun ? 'dry-run' : 'live'}**`,
+      `- Outcome: **${result.outcome.toUpperCase()}**`,
+      '',
+      `Summary: ${result.summary.verified} verified, ${result.summary.failed} failed, ` +
+        `${result.summary.unverified} unverified (of ${result.summary.total}).`,
+      '',
+      '| Post | Status | New time | Reason |',
+      '|------|--------|----------|--------|',
+    ];
+    for (const r of result.results) {
+      lines.push(`| ${r.postId} | ${r.status} | ${r.scheduledLocalTime || '—'} | ${(r.reason || '').replace(/\|/g, '/')} |`);
+    }
+    process.stdout.write(lines.join('\n') + '\n');
+  }
+
+  if (result.outcome === 'complete') return EXIT.SUCCESS;
+  if (result.outcome === 'partial') return EXIT.VALIDATION_FAILURE;
+  return EXIT.TOOLCHAIN_ERROR;
+}
+
+/**
  * Main dispatch.
  *
  * @param {string[]} argv - process.argv.slice(2)
@@ -277,6 +374,9 @@ async function main(argv) {
     }
     return handleRun(opts);
   }
+  if (command === 'reschedule') {
+    return handleReschedule(opts);
+  }
   if (command === 'connect-check' || command === 'doctor') {
     return handleConnectCheck(opts);
   }
@@ -285,7 +385,7 @@ async function main(argv) {
   return EXIT.VALIDATION_FAILURE;
 }
 
-module.exports = { main, parseArgs, handleRun, handleConnectCheck, EXIT, COMMANDS };
+module.exports = { main, parseArgs, handleRun, handleReschedule, handleConnectCheck, EXIT, COMMANDS };
 
 if (require.main === module) {
   Promise.resolve()
