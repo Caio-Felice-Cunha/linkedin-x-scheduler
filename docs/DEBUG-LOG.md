@@ -60,7 +60,7 @@ something weird, read this first — most surprises are already here.
 | E1 | scheduled-queue URL `goto` hung | Same SPA/same-URL issue | Navigate `/home` first, then the queue URL; retry once |
 | E2 | post WAS scheduled but the queue check missed it | The queue preview drops emoji and may render curly quotes | Strip emoji + **normalize quotes/apostrophes** before matching |
 | E3 | **double-post risk** on a verify miss | The original code re-scheduled when verify was inconclusive | **Removed the re-schedule.** Report `scheduled-unverified`; never auto-redo |
-| E4 | a post reconciled `verified` (attempts: 0) but was **never scheduled** | The queue body is **every** scheduled post's full text concatenated; the matcher's 30-char-prefix fallback matched the post's opening phrase **quoted inside another scheduled post** (two same-batch posts quoting the same phrase) | Full-line match stays primary; the truncation fallback now requires an **80-char** prefix |
+| E4 | a post reconciled `verified` (attempts: 0) but was **never scheduled** | The queue body is **every** scheduled post's full text concatenated; the matcher's 30-char-prefix fallback matched the post's opening phrase **quoted inside another scheduled post** (two same-batch posts quoting the same phrase) | Full-line match stays primary; the truncation fallback now requires an **80-char** prefix. Same rule applied to the reschedule matchers (`scheduledTimeFor`/`openScheduledPost`), whose per-tile 30-char needles could read/open the WRONG post when the target was absent and one other tile quoted its opening |
 
 ## F. Content + operational
 

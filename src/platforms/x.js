@@ -1056,7 +1056,12 @@ class XAdapter {
    * @returns {Promise<?string>}
    */
   async scheduledTimeFor(page, firstLine) {
-    const needle = this.normalizeForMatch(firstLine).slice(0, 30);
+    // Match the FULL normalized first line per tile (tiles render the full post
+    // text), with the 80-char-prefix fallback only for long lines a preview may
+    // cut off — the same containment guard as queueContains: a 30-char needle
+    // would match a tile that merely QUOTES the target's opening phrase and
+    // read the wrong tile's "Will send on …" time.
+    const needle = this.normalizeForMatch(firstLine);
     if (needle.length < 8) {
       return null;
     }
@@ -1064,9 +1069,10 @@ class XAdapter {
       const norm = (t) => String(t)
         .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
         .replace(/[‘’‛′]/g, "'").replace(/[“”″]/g, '"').replace(/\s+/g, ' ').trim();
+      const hit = (t) => t.includes(nd) || (nd.length >= 80 && t.includes(nd.slice(0, 80)));
       const btns = Array.from(document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"]'))
         .filter((b) => /will send on/i.test(b.innerText || ''));
-      const m = btns.find((b) => norm(b.innerText || '').includes(nd));
+      const m = btns.find((b) => hit(norm(b.innerText || '')));
       return m ? ((m.innerText || '').split('\n').find((l) => /will send on/i.test(l)) || '').trim() : null;
     }, needle);
   }
@@ -1081,7 +1087,11 @@ class XAdapter {
    * @returns {Promise<{ok:boolean, reason?:string}>}
    */
   async openScheduledPost(page, firstLine) {
-    const needle = this.normalizeForMatch(firstLine).slice(0, 30);
+    // Same full-line needle + 80-char-prefix fallback as scheduledTimeFor: with
+    // a 30-char needle, a tile QUOTING an absent target's opening phrase would
+    // be the SOLE match — the exactly-one guard passes and the WRONG post gets
+    // opened for editing.
+    const needle = this.normalizeForMatch(firstLine);
     if (needle.length < 8) {
       return { ok: false, reason: 'first line too short to match safely' };
     }
@@ -1089,9 +1099,10 @@ class XAdapter {
       const norm = (t) => String(t)
         .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
         .replace(/[‘’‛′]/g, "'").replace(/[“”″]/g, '"').replace(/\s+/g, ' ').trim();
+      const hit = (t) => t.includes(nd) || (nd.length >= 80 && t.includes(nd.slice(0, 80)));
       const btns = Array.from(document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"]'))
         .filter((b) => /will send on/i.test((b.getAttribute('aria-label') || '') + ' ' + (b.innerText || '')));
-      const matches = btns.filter((b) => norm(b.innerText || '').includes(nd));
+      const matches = btns.filter((b) => hit(norm(b.innerText || '')));
       if (matches.length === 0) return 'not-found';
       if (matches.length > 1) return 'ambiguous(' + matches.length + ')';
       matches[0].click();

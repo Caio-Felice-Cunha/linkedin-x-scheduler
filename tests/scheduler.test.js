@@ -393,6 +393,60 @@ async function run() {
       helpers.sleep = realSleep;
     }
   });
+  await test('X reschedule matchers: quoted opening phrase must not match the WRONG tile (regression)', async () => {
+    const x = new XAdapter({ config: {}, runLog: { append() {} } });
+    // scheduledTimeFor/openScheduledPost match per "Will send on …" tile INSIDE
+    // page.evaluate, so this stub evaluate runs the REAL in-page matcher against
+    // fixture tiles through a fake `document`. The quoting tile embeds the
+    // target's opening phrase — with the old 30-char needle it became the SOLE
+    // match when the target was absent, so the exactly-one guard passed: the
+    // wrong tile's time was read (idempotence wrongly skipped "already at
+    // target") or the wrong post was opened for editing.
+    const tile = (sendLine, body) => ({
+      innerText: sendLine + '\n' + body,
+      getAttribute: () => '',
+      clicked: false,
+      click() { this.clicked = true; },
+    });
+    const quoting = tile(
+      'Will send on Fri, Jun 13, 2026, 9:00 AM',
+      'Wild week in AI security. "Emoji smuggling bypassed Azure Prompt Shield and Protect AI" is the quote of the month. Thread below.'
+    );
+    const tiles = [tile('Will send on Thu, Jun 12, 2026, 9:00 AM', 'Unrelated scheduled post about agent evals and red-teaming.'), quoting];
+    const page = {
+      evaluate: async (fn, arg) => {
+        global.document = { querySelectorAll: () => tiles };
+        try { return fn(arg); } finally { delete global.document; }
+      },
+      waitForFunction: async () => true,
+    };
+    // ABSENT from the queue (>=80 chars); its opening ~30 chars ARE quoted in `quoting`.
+    const absent = 'Emoji smuggling bypassed Azure Prompt Shield and Protect AI v2 in our latest round of guardrail tests.';
+    assert.ok(x.normalizeForMatch(quoting.innerText).includes(x.normalizeForMatch(absent).slice(0, 30)), 'fixture: the 30-char prefix IS quoted in another tile (the trap)');
+    assert.strictEqual(await x.scheduledTimeFor(page, absent), null, 'absent post: must not read the quoting tile\'s time');
+    assert.deepStrictEqual(await x.openScheduledPost(page, absent), { ok: false, reason: 'not-found' }, 'absent post: refuse, do not open the quoting tile');
+    // Absent mid-length (30..79 chars) first line: no truncation fallback may fire.
+    const absentMid = 'Emoji smuggling bypassed Azure Prompt Shield once again today';
+    assert.ok(absentMid.length >= 30 && absentMid.length < 80, 'fixture: mid-length needle');
+    assert.strictEqual(await x.scheduledTimeFor(page, absentMid), null);
+    assert.deepStrictEqual(await x.openScheduledPost(page, absentMid), { ok: false, reason: 'not-found' });
+    assert.ok(!quoting.clicked, 'the quoting tile must never be clicked');
+    // PRESENT target: the full first line matches exactly its own tile even with
+    // the quoting tile around (the old 30-char needle saw 2 → ambiguous → refuse).
+    const target = tile('Will send on Sat, Jun 14, 2026, 10:30 AM', absent + '\nMore body text the tile renders below the first line.');
+    tiles.push(target);
+    assert.strictEqual(await x.scheduledTimeFor(page, absent), 'Will send on Sat, Jun 14, 2026, 10:30 AM');
+    assert.deepStrictEqual(await x.openScheduledPost(page, absent), { ok: true }, 'present post: exactly one (the right) match');
+    assert.ok(target.clicked && !quoting.clicked, 'opened the RIGHT tile');
+    // Long first line a tile preview truncates: the 80-char-prefix fallback still matches.
+    const longLine = 'A first line that is genuinely long and keeps going well past the eighty character truncation mark of the tile preview';
+    assert.ok(x.normalizeForMatch(longLine).length >= 90, 'fixture: long line');
+    tiles.push(tile('Will send on Sun, Jun 15, 2026, 8:00 AM', x.normalizeForMatch(longLine).slice(0, 90) + '…'));
+    assert.strictEqual(await x.scheduledTimeFor(page, longLine), 'Will send on Sun, Jun 15, 2026, 8:00 AM', '80-char-prefix fallback still works');
+    // The too-short-to-match-safely guard is preserved.
+    assert.strictEqual(await x.scheduledTimeFor(page, 'tiny 1'), null);
+    assert.deepStrictEqual(await x.openScheduledPost(page, 'tiny 1'), { ok: false, reason: 'first line too short to match safely' });
+  });
   await test('runReschedule: X posts handled, LinkedIn skipped', async () => {
     const fx = makeBatchFixture();
     try {
