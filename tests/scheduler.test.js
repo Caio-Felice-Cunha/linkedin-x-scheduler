@@ -360,6 +360,39 @@ async function run() {
     assert.strictEqual(x.normalizeForMatch('Hello 👇 world'), 'Hello world');
     assert.strictEqual(x.normalizeForMatch('you’ve “shipped”'), 'you\'ve "shipped"');
   });
+  await test('X queueContains: opening phrase quoted in ANOTHER post must not false-verify (regression)', async () => {
+    const x = new XAdapter({ config: {}, runLog: { append() {} } });
+    // The queue page renders EVERY scheduled post's full text in one body. Entry
+    // B quotes entry A's opening phrase mid-text — the trigger that made the old
+    // 30-char-prefix fallback reconcile an UNSCHEDULED post as `verified`.
+    const queueBody = [
+      'Will send on Thu, Jun 12, 2026, 9:00 AM',
+      'Unrelated scheduled post about agent evals and red-teaming.',
+      'Will send on Fri, Jun 13, 2026, 9:00 AM',
+      'Wild week in AI security. "Emoji smuggling bypassed Azure Prompt Shield and Protect AI" is the quote of the month. Thread below.',
+    ].join('\n');
+    const page = { goto: async () => {}, evaluate: async () => queueBody };
+    const realSleep = helpers.sleep;
+    helpers.sleep = async () => {};
+    try {
+      // Absent from the queue, >=80 chars, shares its opening ~60 chars with B's quote.
+      const absentLong = 'Emoji smuggling bypassed Azure Prompt Shield and Protect AI v2 in our latest round of guardrail tests.';
+      assert.ok(absentLong.length >= 80, 'fixture: long needle');
+      assert.ok(queueBody.includes(absentLong.slice(0, 30)), 'fixture: the 30-char prefix IS contained (the trap)');
+      assert.strictEqual(await x.queueContains(page, absentLong), false, 'long needle: 80-char prefix absent → no match');
+      // Absent from the queue, 30..79 chars → the truncation fallback must not fire at all.
+      const absentMid = 'Emoji smuggling bypassed Azure Prompt Shield once again today';
+      assert.ok(absentMid.length >= 30 && absentMid.length < 80, 'fixture: mid-length needle');
+      assert.strictEqual(await x.queueContains(page, absentMid), false, 'mid needle: full-line match only');
+      // Present posts still match: by full first line (primary)…
+      assert.strictEqual(await x.queueContains(page, 'Unrelated scheduled post about agent evals and red-teaming.'), true);
+      // …and by the 80-char fallback when the queue preview truncates a long line.
+      const truncatedLong = 'Wild week in AI security. "Emoji smuggling bypassed Azure Prompt Shield and Protect AI" is the quote of the month. Thread below. EXTRA TAIL THE PREVIEW DROPPED';
+      assert.strictEqual(await x.queueContains(page, truncatedLong), true, '80-char-prefix fallback still works');
+    } finally {
+      helpers.sleep = realSleep;
+    }
+  });
   await test('runReschedule: X posts handled, LinkedIn skipped', async () => {
     const fx = makeBatchFixture();
     try {

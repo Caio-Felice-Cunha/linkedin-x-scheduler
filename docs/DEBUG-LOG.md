@@ -60,13 +60,14 @@ something weird, read this first — most surprises are already here.
 | E1 | scheduled-queue URL `goto` hung | Same SPA/same-URL issue | Navigate `/home` first, then the queue URL; retry once |
 | E2 | post WAS scheduled but the queue check missed it | The queue preview drops emoji and may render curly quotes | Strip emoji + **normalize quotes/apostrophes** before matching |
 | E3 | **double-post risk** on a verify miss | The original code re-scheduled when verify was inconclusive | **Removed the re-schedule.** Report `scheduled-unverified`; never auto-redo |
+| E4 | a post reconciled `verified` (attempts: 0) but was **never scheduled** | The queue body is **every** scheduled post's full text concatenated; the matcher's 30-char-prefix fallback matched the post's opening phrase **quoted inside another scheduled post** (two same-batch posts quoting the same phrase) | Full-line match stays primary; the truncation fallback now requires an **80-char** prefix |
 
 ## F. Content + operational
 
 | # | Symptom | Root cause | Fix |
 |---|---|---|---|
 | F1 | X post wouldn't schedule; Schedule button effectively dead | **Post text > the platform character limit** disables X's Schedule button | Keep X posts within the limit (pre-flight check) |
-| F2 | a post reported `verified` but was **never actually scheduled** | A stale `verified` from an earlier rehearsal/reconcile; it was never in the queue | **Always double-check both live queues at the end**; reset state to `pending` + re-run the missing one |
+| F2 | a post reported `verified` but was **never actually scheduled** | A stale `verified` from an earlier rehearsal/reconcile (or the E4 reconcile false-match); it was never in the queue | **Always double-check both live queues at the end**; reset state to `pending` + re-run the missing one |
 | F3 | run aborted: `ERR_NAME_NOT_RESOLVED` | Transient DNS/network blip in preflight | Just re-run |
 
 ---
@@ -76,5 +77,5 @@ something weird, read this first — most surprises are already here.
 1. **No native OS file dialogs — ever.** Drive `<input type=file>` directly. (A)
 2. **X renders two of every control** (modal over timeline) → scope to `[role="dialog"]`. (C1, D, E2)
 3. **Paste text on X, never type** — typing duplicates #hashtags and breaks on emoji. (C3–C5)
-4. **Verify by reading state directly** (select values, composer-closed, queue contents), not by scraping rendered prose — and double-check the live queues at the end. (D3, D4, F2)
+4. **Verify by reading state directly** (select values, composer-closed, queue contents), not by scraping rendered prose — and double-check the live queues at the end. (D3, D4, E4, F2)
 5. **Be duplicate-safe:** dedupe before acting, reset-to-pending for re-runs, never auto-re-schedule on a verify miss. (B6, D4, E3)

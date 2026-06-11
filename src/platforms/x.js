@@ -929,14 +929,20 @@ class XAdapter {
       return false;
     }
     // The scheduled list lives at /compose/post/unsent/scheduled and shows the
-    // full post text ("Will send on … | <body>"). Two robustness fixes proven by
-    // diagnostics:
+    // full post text ("Will send on … | <body>"). Three robustness fixes proven
+    // by diagnostics:
     //   1) Navigation: a same-URL/SPA goto from a stuck state hangs; a direct
     //      goto works when preceded by a clean reset, so on failure we reset to
     //      /home and retry once.
     //   2) Matching: X renders emoji as Twemoji <img> (innerText drops the
     //      char), so we strip emoji from BOTH the needle and the body before
     //      comparing, and match the first line (sans trailing emoji).
+    //   3) Fallback: the body is EVERY scheduled post's full text concatenated,
+    //      so the truncation fallback (for first lines the queue preview cuts
+    //      off) must use a LONG prefix — a 30-char prefix false-matched a post
+    //      whose opening phrase was quoted inside ANOTHER scheduled post, and
+    //      reconcile marked it verified without ever scheduling it. The fallback
+    //      requires an 80-char prefix; the full-needle match stays primary.
     const stripEmoji = (s) =>
       String(s)
         .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{200D}]/gu, '')
@@ -986,7 +992,7 @@ class XAdapter {
       const body = stripEmoji(raw);
       return (
         body.includes(needle) ||
-        (needle.length >= 30 && body.includes(needle.slice(0, 30)))
+        (needle.length >= 80 && body.includes(needle.slice(0, 80)))
       );
     } catch (error) {
       void error;
