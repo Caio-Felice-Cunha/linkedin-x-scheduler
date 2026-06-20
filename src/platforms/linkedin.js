@@ -5,9 +5,9 @@
  *
  * Schedules a LinkedIn document (PDF carousel) or single-image post on the
  * operator's live, connected session by:
- *   1. composing the verbatim text into the Quill `.ql-editor` via
- *      `execCommand('insertText')` (the validated technique — `page.type` does
- *      NOT reach this editor),
+ *   1. composing the verbatim text into the Quill `.ql-editor` via a clipboard
+ *      PASTE (with synthetic-event fallbacks — `execCommand('insertText')` and
+ *      `page.type` do NOT reach LinkedIn's current editor),
  *   2. attaching the asset DIRECTLY via `page.setInputFiles(<input type=file>, …)`
  *      — NO native OS dialog (this is the whole point: no host file picker),
  *   3. setting the schedule through the clock dialog at the target time
@@ -211,8 +211,51 @@ class LinkedInAdapter {
       return;
     }
     // "Start a post" affordance — found by accessible name, not pixels.
+    // The share-box module can be slow to hydrate (or absent when a feed video
+    // takes over the view), so poll for the button briefly before clicking.
     const starter = page.getByRole('button', { name: /start a post/i });
-    await starter.first().click({ timeout: this.core.config.stepTimeoutMs });
+    let starterCount = 0;
+    for (let i = 0; i < 10; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      starterCount = await starter.count();
+      if (starterCount > 0) {
+        break;
+      }
+      // eslint-disable-next-line no-await-in-loop
+      await helpers.sleep(500);
+    }
+    let editorMounted = false;
+    if (starterCount > 0) {
+      await starter.first().click({ timeout: this.core.config.stepTimeoutMs }).catch(() => {});
+      // The button can be present but shadowed by a feed video overlay, so the
+      // click does not reach the composer. Briefly poll for the editor; if it
+      // does not mount, fall through to the deep-link route below.
+      for (let i = 0; i < 8; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        if ((await page.locator(EDITOR_SELECTORS[0]).count()) > 0) {
+          editorMounted = true;
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await helpers.sleep(500);
+      }
+    }
+    if (!editorMounted) {
+      // FALLBACK: the "Start a post" button was absent or its click did not open
+      // the composer (share box not mounted / displaced by a feed video).
+      // LinkedIn opens the composer overlay directly via the feed's shareActive
+      // deep link — a real navigation that mounts the same Quill editor without
+      // depending on the share-box button.
+      this.core.runLog.append({
+        postId: 'linkedin',
+        action: 'open-composer',
+        result: 'fallback',
+        detail: `start-a-post ${starterCount > 0 ? 'click did not mount editor' : 'button absent'} — using ?shareActive=true overlay route`,
+      });
+      await page.goto('https://www.linkedin.com/feed/?shareActive=true', {
+        waitUntil: 'domcontentloaded',
+      });
+    }
     // Poll-based verify waits for the editor to actually render after the click.
     await this.core.verify(
       async () => (await page.locator(EDITOR_SELECTORS[0]).count()) > 0,
@@ -245,15 +288,20 @@ class LinkedInAdapter {
   }
 
   /**
-   * Insert verbatim text into the Quill editor via `execCommand('insertText')`
-   * (the validated technique). Clears a stale draft first, verifies the rendered
-   * length matches, and dismisses any autocomplete dropdown. Falls back through
-   * the editor-selector chain if `.ql-editor` is absent.
+   * Insert verbatim text into the Quill editor via an ORDERED insertion
+   * FALLBACK CHAIN. LinkedIn changed its Quill composer and
+   * `document.execCommand('insertText')` now NO-OPS (inserts 0 chars), so we
+   * lead with the clipboard PASTE method (a one-shot insertion) and fall back
+   * through synthetic `InputEvent('insertText')` → a synthetic DataTransfer
+   * paste → slow `pressSequentially`, verifying the rendered text after EACH
+   * method and keeping the first that lands. Clears a stale draft first;
+   * resolves the editor through the EDITOR_SELECTORS chain. Keeps the trimmed
+   * length-verify guard (only throws if ALL methods fail).
    *
    * @param {object} page - the connected Playwright Page
    * @param {string} text - the verbatim post text
    * @returns {Promise<void>}
-   * @throws {Error} if no editor selector resolves or the length check fails
+   * @throws {Error} if no editor selector resolves or no method lands the text
    */
   async insertText(page, text) {
     // Resolve the editor with the fallback chain.
@@ -269,50 +317,223 @@ class LinkedInAdapter {
       throw new Error('LinkedIn editor not found (.ql-editor / contenteditable).');
     }
 
-    // Focus + clear a stale draft (Ctrl+A, Delete).
-    await page.locator(selector).focus();
+    const editor = () => page.locator(selector).first();
+
+    /** Read the editor's current text content (best-effort). */
+    const readText = async () => {
+      try {
+        return (await editor().innerText()) || '';
+      } catch (error) {
+        void error;
+        return '';
+      }
+    };
+
+    // Bring the tab to the front so navigator.clipboard.writeText (which needs a
+    // focused document) succeeds for the clipboard-paste method.
+    await page.bringToFront().catch(() => {});
+
+    // Focus + clear a stale draft (Ctrl+A, Delete) before the focus/paste. Done
+    // once up front; each method re-focuses the editor itself.
+    await editor().focus().catch(() => {});
     await page.keyboard.press('Control+A');
     await page.keyboard.press('Delete');
 
-    // The validated insertion: focus the editor and execCommand insertText.
-    // Passing the text as an argument (not interpolated) avoids any escaping
-    // pitfalls with quotes/newlines in the copy.
-    await page.evaluate(
-      ({ sel, value }) => {
-        const el = document.querySelector(sel);
-        if (!el) {
-          return false;
-        }
-        el.focus();
-        // eslint-disable-next-line no-undef
-        document.execCommand('insertText', false, value);
-        return true;
+    // Grant clipboard permissions for the LinkedIn origin so the paste method's
+    // navigator.clipboard.writeText is allowed (origin-scoped).
+    await page
+      .context()
+      .grantPermissions(['clipboard-read', 'clipboard-write'], { origin: 'https://www.linkedin.com' })
+      .catch(() => {});
+
+    // Insertion attempts, best-first. clipboard PASTE inserts in one shot, so
+    // LinkedIn's hashtag/mention autocomplete never fires. Fallbacks cover
+    // editors where paste is blocked: synthetic InputEvent('insertText') →
+    // synthetic DataTransfer paste → slow pressSequentially. (execCommand was
+    // removed: it no-ops on LinkedIn's current Quill — the exact bug this fixes.)
+    const methods = [
+      {
+        id: 'clipboard-paste',
+        run: async () => {
+          const wrote = await page.evaluate(async (t) => {
+            try {
+              // eslint-disable-next-line no-undef
+              await navigator.clipboard.writeText(t);
+              return true;
+            } catch (e) {
+              void e;
+              return false;
+            }
+          }, text);
+          if (!wrote) {
+            throw new Error('clipboard write failed (document not focused?)');
+          }
+          await editor().click();
+          await page.keyboard.press('Control+V');
+          await helpers.sleep(700);
+        },
       },
-      { sel: selector, value: text }
-    );
+      {
+        id: 'input-event',
+        run: async () => {
+          await editor().click();
+          await page.evaluate(
+            ({ sel, value }) => {
+              // eslint-disable-next-line no-undef
+              const el = document.querySelector(sel);
+              if (!el) {
+                return false;
+              }
+              el.focus();
+              // eslint-disable-next-line no-undef
+              el.dispatchEvent(
+                // eslint-disable-next-line no-undef
+                new InputEvent('beforeinput', {
+                  inputType: 'insertText',
+                  data: value,
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+              // eslint-disable-next-line no-undef
+              el.dispatchEvent(
+                // eslint-disable-next-line no-undef
+                new InputEvent('input', {
+                  inputType: 'insertText',
+                  data: value,
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+              return true;
+            },
+            { sel: selector, value: text }
+          );
+          await helpers.sleep(400);
+        },
+      },
+      {
+        id: 'datatransfer-paste',
+        run: async () => {
+          await editor().click();
+          await page.evaluate(
+            ({ sel, value }) => {
+              // eslint-disable-next-line no-undef
+              const el = document.querySelector(sel);
+              if (!el) {
+                return false;
+              }
+              el.focus();
+              // eslint-disable-next-line no-undef
+              const dt = new DataTransfer();
+              dt.setData('text/plain', value);
+              // eslint-disable-next-line no-undef
+              el.dispatchEvent(
+                // eslint-disable-next-line no-undef
+                new ClipboardEvent('paste', {
+                  clipboardData: dt,
+                  bubbles: true,
+                  cancelable: true,
+                })
+              );
+              return true;
+            },
+            { sel: selector, value: text }
+          );
+          await helpers.sleep(400);
+        },
+      },
+      {
+        id: 'slow-type',
+        run: async () => {
+          await editor().click();
+          await editor().pressSequentially(text, { delay: 8 });
+          await helpers.sleep(500);
+        },
+      },
+    ];
 
-    // NOTE: do NOT press Escape here — on LinkedIn, Escape closes the composer
-    // modal (the editor would vanish and the retry would find nothing). Because
-    // the text is inserted all-at-once via execCommand (not keystroke-by-
-    // keystroke), the hashtag/mention autocomplete dropdown never triggers, so
-    // there is nothing to dismiss. The dropdown (if any) closes when the next
-    // step clicks the media affordance.
-
-    // Verify the rendered text length. LinkedIn may normalise
-    // whitespace slightly, so compare trimmed lengths with a small tolerance and
-    // assert the first line is present verbatim.
-    const rendered = await page.locator(selector).innerText();
     const expectedLen = text.trim().length;
-    const actualLen = (rendered || '').trim().length;
     const firstLine = helpers.firstLine(text);
-    const ok =
-      Math.abs(actualLen - expectedLen) <= Math.ceil(expectedLen * 0.05) &&
-      (rendered || '').includes(firstLine);
-    if (!ok) {
+    /** Does the rendered text satisfy the length-verify guard
+     *  (trimmed length within 5% tolerance AND includes the verbatim first line)? */
+    const matches = (rendered) => {
+      const actualLen = (rendered || '').trim().length;
+      return (
+        Math.abs(actualLen - expectedLen) <= Math.ceil(expectedLen * 0.05) &&
+        (rendered || '').includes(firstLine)
+      );
+    };
+
+    let succeeded = null;
+    let lastActualLen = 0;
+    for (const method of methods) {
+      // Re-clear before each attempt so a partial prior method does not stack.
+      // eslint-disable-next-line no-await-in-loop
+      await editor().click().catch(() => {});
+      // eslint-disable-next-line no-await-in-loop
+      await page.keyboard.press('Control+A');
+      // eslint-disable-next-line no-await-in-loop
+      await page.keyboard.press('Delete');
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await method.run();
+      } catch (error) {
+        this.core.runLog.append({
+          postId: 'linkedin',
+          action: `li-insert(${method.id})`,
+          result: 'error',
+          detail: error.message,
+        });
+        continue;
+      }
+      // NOTE: do NOT press Escape here — on LinkedIn, Escape closes the composer
+      // modal (the editor would vanish and the retry would find nothing). The
+      // text is bulk-inserted (no per-keystroke autocomplete to dismiss); any
+      // dropdown closes when the next step clicks the media affordance.
+      // eslint-disable-next-line no-await-in-loop
+      const rendered = await readText();
+      lastActualLen = (rendered || '').trim().length;
+      if (matches(rendered)) {
+        succeeded = method.id;
+        break;
+      }
+      this.core.runLog.append({
+        postId: 'linkedin',
+        action: `li-insert(${method.id})`,
+        result: 'mismatch',
+        detail: `rendered length ${lastActualLen}`,
+      });
+    }
+
+    // KEEP the length-verify guard: only throw if ALL methods failed.
+    if (!succeeded) {
       throw new Error(
-        `Composed text length mismatch (expected ~${expectedLen}, got ${actualLen}).`
+        `Composed text length mismatch (expected ~${expectedLen}, got ${lastActualLen}).`
       );
     }
+    this.core.runLog.append({
+      postId: 'linkedin',
+      action: 'li-insert',
+      result: 'ok',
+      detail: `method=${succeeded}`,
+    });
+  }
+
+  /**
+   * Wait for the composer media toolbar to render (the "Add media" button is the
+   * anchor). The toolbar mounts a beat after the editor, so an immediate
+   * interaction otherwise resolves stale feed elements. Best-effort, never throws.
+   *
+   * @param {object} page - the connected Playwright Page
+   * @returns {Promise<void>}
+   */
+  async ensureComposerToolbar(page) {
+    await page
+      .getByRole('button', { name: /^add media$/i })
+      .first()
+      .waitFor({ state: 'visible', timeout: this.core.config.stepTimeoutMs })
+      .catch(() => {});
   }
 
   /**
@@ -326,12 +547,66 @@ class LinkedInAdapter {
    * @returns {Promise<void>}
    */
   async attachDocument(page, pdfPath, docTitle, postId) {
-    // Expand the "+"/More overflow, then "Add a document" by accessible name.
-    await this.openMediaAffordance(page, /add a document|document/i);
-    // Locate the file input within the open media dialog; setInputFiles works
-    // on hidden inputs. NO OS dialog.
-    const input = page.locator('input[type="file"]').last();
-    await input.setInputFiles(pdfPath, { timeout: this.core.config.stepTimeoutMs });
+    await this.ensureComposerToolbar(page);
+
+    // The current LinkedIn composer opens a NATIVE OS file picker when "Add a
+    // document" is clicked. A PERSISTENT filechooser handler keeps Playwright's
+    // CDP file-chooser interception ON continuously, so the picker is intercepted
+    // and the PDF supplied no matter how or when the click triggers it — no
+    // native dialog can appear. (A one-shot waitForEvent leaves a gap and the OS
+    // dialog leaks through.) The menu clicks are dispatched in-page so the
+    // interop-outlet overlay cannot intercept them; with the handler registered,
+    // the picker those clicks open is still intercepted.
+    let chooserHandled = false;
+    const onChooser = async (fc) => {
+      try {
+        await fc.setFiles(pdfPath);
+        chooserHandled = true;
+      } catch (error) {
+        void error;
+      }
+    };
+    page.on('filechooser', onChooser);
+    try {
+      // In-page click dispatch by accessible name (bypasses interop-outlet).
+      const dispatchClick = (re) =>
+        page.evaluate(
+          (src) => {
+            const rx = new RegExp(src.source, src.flags);
+            const el = [
+              ...document.querySelectorAll('button,[role=button],[role=menuitem]'),
+            ].find((x) =>
+              rx.test((x.getAttribute('aria-label') || x.textContent || '').trim()));
+            if (el) {
+              el.click();
+              return true;
+            }
+            return false;
+          },
+          { source: re.source, flags: re.flags }
+        );
+
+      let clickedDoc = await dispatchClick(/^add a document$/i);
+      if (!clickedDoc) {
+        // "Add a document" is behind the "More" overflow — open it, then retry.
+        await dispatchClick(/^more$|add to your post|show more/i);
+        await page.waitForTimeout(1000);
+        clickedDoc = await dispatchClick(/^add a document$/i);
+      }
+      // Give the persistent handler time to supply the file once the picker
+      // fires, OR an in-page modal time to mount its input.
+      await page.waitForTimeout(2500);
+      if (!chooserHandled) {
+        // Fallback: an in-page upload modal that exposes a hidden file input.
+        await page
+          .locator('input[type="file"]')
+          .last()
+          .setInputFiles(pdfPath, { timeout: this.core.config.stepTimeoutMs })
+          .catch(() => {});
+      }
+    } finally {
+      page.off('filechooser', onChooser);
+    }
 
     // Title is REQUIRED to finish ("Please add a title to finish your post").
     // The field has NO accessible name — target it by placeholder (the
@@ -394,9 +669,13 @@ class LinkedInAdapter {
     // setInputFiles leaves the native "Open" dialog ORPHANED and modal-locks the
     // whole machine — the bug we hit. The document flow uses an in-page dialog so
     // it is unaffected.)
+    await this.ensureComposerToolbar(page);
     const [chooser] = await Promise.all([
       page.waitForEvent('filechooser', { timeout: this.core.config.stepTimeoutMs }),
-      this.openMediaAffordance(page, /add a photo|add media|photo|image/i),
+      page
+        .getByRole('button', { name: /^add media$/i })
+        .first()
+        .click({ timeout: this.core.config.stepTimeoutMs }),
     ]);
     await chooser.setFiles(pngPath);
 
@@ -477,15 +756,23 @@ class LinkedInAdapter {
     await page.locator('#share-post__scheduled-time').fill(timeStr);
     await page.keyboard.press('Tab');
 
-    // Verify the dialog reflects the intended day + time + time zone.
+    // Verify the schedule fields hold the intended date + time. (LinkedIn no
+    // longer prints the literal "Pacific" label in the dialog; the timezone is
+    // the account default. Reading the field values is more robust than scraping
+    // page text.)
     await this.core.verify(async () => {
-      const body = await page.evaluate(() => document.body.innerText || '');
-      return (
-        typeof body === 'string' &&
-        body.includes(timeStr) &&
-        /pacific/i.test(body)
-      );
-    }, `schedule dialog shows ${timeStr} Pacific`);
+      const norm = (s) =>
+        (s || '').toString().toLowerCase().replace(/\s+/g, '').replace(/\b0(\d)/g, '$1');
+      const timeVal = await page
+        .locator('#share-post__scheduled-time')
+        .inputValue()
+        .catch(() => '');
+      const dateVal = await page
+        .locator('#share-post__scheduled-date')
+        .inputValue()
+        .catch(() => '');
+      return norm(timeVal) === norm(timeStr) && norm(dateVal) === norm(dateStr);
+    }, `schedule fields show ${dateStr} ${timeStr}`);
   }
 
   /**
