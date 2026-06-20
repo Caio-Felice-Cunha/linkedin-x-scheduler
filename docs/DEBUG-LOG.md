@@ -72,9 +72,31 @@ something weird, read this first — most surprises are already here.
 
 ---
 
+## G. LinkedIn composer overhaul — June 2026
+
+LinkedIn rebuilt its post composer in mid-2026; the adapter broke at **four** steps. All four are fixed. Two follow-on issues remain open.
+
+| # | Symptom | Root cause | Fix | Where |
+|---|---|---|---|---|
+| G1 | Text insert landed **0 chars** (`Composed text length mismatch … got 0`) | The rebuilt `.ql-editor` ignores `document.execCommand('insertText')` (long-deprecated; the new editor no longer honours it) | Switch LinkedIn to the **clipboard-paste** path X already used: grant clipboard perms, `navigator.clipboard.writeText`, focus `.ql-editor`, Ctrl+V (kept the Ctrl+A/Delete clear + trimmed-length verify) | `linkedin.js` `insertText` |
+| G2 | `attach-image` timed out on `waitForEvent('filechooser')` | The broad `/photo\|image/` trigger resolved a wrong/feed element so no chooser fired; the media toolbar also mounts a beat **after** the editor | Added `ensureComposerToolbar` (waits for the `^add media$` button), then race `waitForEvent('filechooser')` against a precise **"Add media"** click + `setFiles` | `linkedin.js` `attachImage` + new `ensureComposerToolbar` |
+| G3 | `set-schedule` verify failed (`… shows <time> Pacific`) although the time WAS set | LinkedIn **dropped the literal "Pacific" label** from the schedule dialog; the verify scraped `document.body.innerText` for "Pacific" | Verify the **field values** instead: read `#share-post__scheduled-date` / `#share-post__scheduled-time` (`inputValue`) normalized against the target. Timezone is the account default | `linkedin.js` `setSchedule` |
+| G4 | "Add a document" popped a **native OS "Open" dialog** that orphaned the desktop; the `setInputFiles` fallback then timed out | (a) a **one-shot** `waitForEvent('filechooser')` left CDP chooser-interception OFF at the moment the picker fired → the native dialog leaked; (b) "Add a document" sits behind a **"More" overflow covered by an `#interop-outlet` overlay** that intercepts Playwright clicks | Register a **persistent** `page.on('filechooser', fc => fc.setFiles(pdf))` (interception stays ON continuously → no native dialog; removed in `finally`); **DOM-dispatch** the "More" + "Add a document" clicks via `page.evaluate` to bypass the overlay, with a `setInputFiles` fallback | `linkedin.js` `attachDocument` |
+
+**Still open (uploads now work; finalization does not):**
+
+| # | Symptom | Root cause | Status |
+|---|---|---|---|
+| G5 | Carousel/**document finalization** inconsistent run-to-run | The PDF uploads cleanly now, but the doc-modal **title + "Done enabled"** step renders inconsistently | OPEN — document/carousel posts currently scheduled by hand |
+| G6 | LI posts report `scheduled-unverified` though actually scheduled | The post-schedule **"View all scheduled posts"** view is no longer machine-readable (returns the feed) → `queueContains` can't confirm, and the **dedupe is blind** (do **not** blindly re-run a LI post — it can duplicate) | OPEN — needs a new selector/route for the scheduled-posts view; confirm visually |
+
+> **New rule (augments meta-lesson 1):** keep a **persistent** `page.on('filechooser')` handler registered for the whole upload. A one-shot `waitForEvent` leaves interception-off gaps that leak the native OS dialog (G4).
+
+---
+
 ## The five meta-lessons
 
-1. **No native OS file dialogs — ever.** Drive `<input type=file>` directly. (A)
+1. **No native OS file dialogs — ever.** Drive `<input type=file>` directly, and keep a **persistent** `page.on('filechooser')` handler during uploads (a one-shot wait leaks the OS dialog). (A, G4)
 2. **X renders two of every control** (modal over timeline) → scope to `[role="dialog"]`. (C1, D, E2)
 3. **Paste text on X, never type** — typing duplicates #hashtags and breaks on emoji. (C3–C5)
 4. **Verify by reading state directly** (select values, composer-closed, queue contents), not by scraping rendered prose — and double-check the live queues at the end. (D3, D4, E4, F2)
