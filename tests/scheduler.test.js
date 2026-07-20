@@ -496,7 +496,11 @@ async function run() {
     assert.deepStrictEqual(offenders, []);
   });
   await test('guard: no leaked private identifiers in src/', () => {
-    const banned = /caio-cunha|@Caio_Cunha|RUNBOOK|EPIC-E|\bAIOX\b/i;
+    // Widened beyond the original four terms: a port from a private working copy
+    // can carry internal story ids, run ids, recipe filenames or absolute local
+    // paths in a comment, and those are exactly the things that slip through a
+    // code review of an otherwise-correct behavioural change.
+    const banned = /caio-cunha|@Caio_Cunha|RUNBOOK|EPIC-[A-Z]|\bE\d-S\d|\bAP-E\d|\bRC-\d\b|\bAIOX\b|recipe-\w+\.md|content\/output\/|\bW\d{2}-[A-Z]|\bRedax\b|voxpage|[A-Z]:\\Users\\|\/Users\/caiof/i;
     const offenders = [];
     const walk = (dir) => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -507,6 +511,86 @@ async function run() {
     };
     walk(path.join(__dirname, '..', 'src'));
     assert.deepStrictEqual(offenders, [], `private refs leaked in: ${offenders.join(', ')}`);
+  });
+
+  // ---------------- media editor dismissal (regression) ----------------
+
+  /**
+   * Minimal page fake for attachImage. `editorAlwaysVisible` models the failure
+   * this test exists for: the upload renders its own blob previews while the
+   * media editor never closes.
+   */
+  function makeAttachPage(opts = {}) {
+    const clicks = [];
+    const editorButton = {
+      count: async () => (opts.editorAlwaysVisible ? 1 : 0),
+      first() { return this; },
+      isVisible: async () => Boolean(opts.editorAlwaysVisible),
+      waitFor: async () => {
+        if (!opts.editorAlwaysVisible) throw new Error('no media editor');
+        return null;
+      },
+      click: async () => { clicks.push('editor-next'); },
+    };
+    return {
+      clicks,
+      url: () => 'https://www.linkedin.com/feed/',
+      goto: async () => {},
+      evaluate: async () => '',
+      screenshot: async () => {},
+      bringToFront: async () => {},
+      waitForEvent: async () => ({ setFiles: async () => {} }),
+      getByRole: (role, o) => {
+        const name = String((o && o.name) || '');
+        if (/\^\(next\|done\)\$/.test(name)) return editorButton;
+        return {
+          count: async () => 1,
+          first() { return this; },
+          isVisible: async () => true,
+          click: async () => { clicks.push(name); },
+          waitFor: async () => null,
+        };
+      },
+      // The image preview always resolves, so this test isolates the editor check.
+      locator: () => ({ count: async () => 1, first() { return this; } }),
+    };
+  }
+
+  await test('attachImage: fails when the media editor is never dismissed', async () => {
+    const { LinkedInAdapter } = require('../src/platforms/linkedin');
+    const page = makeAttachPage({ editorAlwaysVisible: true });
+    const adapter = new LinkedInAdapter({
+      config: { stepTimeoutMs: 50, uploadTimeoutMs: 50 },
+      verify: async (fn, description) => {
+        if (!(await fn())) throw new Error(`Verification failed: ${description}`);
+        return true;
+      },
+      screenshot: async () => null,
+      runLog: { append: () => {} },
+    });
+    adapter.ensureComposerToolbar = async () => {};
+    // A preview alone used to satisfy this. It must now also require the editor
+    // to be gone, otherwise the run continues with no composer to schedule from.
+    await assert.rejects(
+      () => adapter.attachImage(page, '/tmp/a.png'),
+      /media editor dismissed/
+    );
+  });
+
+  await test('attachImage: succeeds when no media editor appears', async () => {
+    const { LinkedInAdapter } = require('../src/platforms/linkedin');
+    const page = makeAttachPage({ editorAlwaysVisible: false });
+    const adapter = new LinkedInAdapter({
+      config: { stepTimeoutMs: 50, uploadTimeoutMs: 50 },
+      verify: async (fn, description) => {
+        if (!(await fn())) throw new Error(`Verification failed: ${description}`);
+        return true;
+      },
+      screenshot: async () => null,
+      runLog: { append: () => {} },
+    });
+    adapter.ensureComposerToolbar = async () => {};
+    await adapter.attachImage(page, '/tmp/a.png');
   });
 
   console.log(`\nTests: ${passed} passed, ${failed} failed.`);
