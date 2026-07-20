@@ -94,6 +94,19 @@ LinkedIn rebuilt its post composer in mid-2026; the adapter broke at **four** st
 
 ---
 
+## H. Upload timing and SPA navigation (July 2026)
+
+Two failures with the same shape: an `await` returned before the thing it was waiting for had actually happened.
+
+| # | Symptom | Root cause | Fix | Where |
+|---|---|---|---|---|
+| H1 | Media attach reported success, but the run then failed at the schedule step with no composer in sight | `chooser.setFiles()` resolves when the **file input is populated**, not when the upload has **rendered**. The Next/Done loop looked for the media editor before it existed, found nothing, and broke out immediately — leaving the run inside the editor, one modal short of the composer. The preview verify passed anyway, because the editor renders `blob:` previews **of its own** | Wait for the first Next/Done (bounded by `uploadTimeoutMs`), click through up to 4 editor screens, and require the editor to be **gone** as part of the verify — not just a preview to be present | `platforms/linkedin.js` `attachImage` |
+| H2 | The first post of a batch schedules fine; every later one fails with the editor never appearing | `page.goto(..., { waitUntil: 'commit' })` resolves as soon as navigation commits, long before the SPA mounts. The compose `goto` raced the home `goto` and stranded the page mid-navigation, so the editor never mounted and the verify burned its full timeout | Settle after the home hop **and** after the compose hop, so the composer is actually mounted before the verify runs | `platforms/x.js` `openComposer` |
+
+> **Meta-lesson 6 (new):** a resolved promise is not a rendered UI. When an `await` returns, ask what it actually proves — `setFiles` proves an input is populated, `commit` proves a navigation started. Verify the **end state you depend on** (the editor is gone, the composer exists), never the fact that a call returned.
+
+---
+
 ## The five meta-lessons
 
 1. **No native OS file dialogs — ever.** Drive `<input type=file>` directly, and keep a **persistent** `page.on('filechooser')` handler during uploads (a one-shot wait leaks the OS dialog). (A, G4)
