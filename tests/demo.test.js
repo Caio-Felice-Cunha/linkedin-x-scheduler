@@ -36,3 +36,8 @@ test('CLI recognizes demo and output without arming live mode', () => {
   assert.equal(args.output, 'site');
   assert.equal(args.mode, 'dry-run');
 });
+
+test('static viewer renders report values without HTML injection sinks', () => {
+  const viewer = fs.readFileSync(path.join(process.cwd(), 'site', 'app.js'), 'utf8');
+  assert.doesNotMatch(viewer, /innerHTML|insertAdjacentHTML|document\.write/);
+});
