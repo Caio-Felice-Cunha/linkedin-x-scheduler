@@ -679,20 +679,51 @@ class LinkedInAdapter {
     ]);
     await chooser.setFiles(pngPath);
 
-    // An optional media editor/crop view may appear — click Next/Done to return.
-    const editorNext = page.getByRole('button', { name: /^(next|done)$/i });
+    // An optional media editor/crop view may appear. `setFiles` resolves as soon
+    // as the file input is populated, NOT when the upload has finished
+    // rendering, so on a slow upload the editor may not exist yet when we look
+    // for it. Checking once and moving on leaves the run stranded INSIDE the
+    // editor, one modal short of the composer. Wait for the first Next/Done
+    // instead of assuming it is already on screen.
+    const editorButton = () => page.getByRole('button', { name: /^(next|done)$/i });
     try {
-      if ((await editorNext.count()) > 0 && (await editorNext.first().isVisible())) {
-        await editorNext.first().click({ timeout: 5000 });
-      }
+      await editorButton()
+        .first()
+        .waitFor({ state: 'visible', timeout: this.core.config.uploadTimeoutMs });
     } catch (error) {
-      void error; // No media editor — the image attached directly.
+      void error; // No media editor at all — the image attached directly.
+    }
+    for (let i = 0; i < 4; i += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        if ((await editorButton().count()) === 0 || !(await editorButton().first().isVisible())) {
+          break;
+        }
+        // eslint-disable-next-line no-await-in-loop
+        await editorButton().first().click({ timeout: 5000 });
+        // A further editor screen (a review grid, then Done) can take a moment
+        // to render; the absence of one simply ends the loop.
+        // eslint-disable-next-line no-await-in-loop
+        await editorButton()
+          .first()
+          .waitFor({ state: 'visible', timeout: 4000 })
+          .catch(() => {});
+      } catch (error) {
+        void error; // No (more) media editor — back in the composer.
+        break;
+      }
     }
 
-    // Verify a thumbnail/preview is present in the composer.
+    // Verify a thumbnail/preview is present AND the media editor is gone. The
+    // preview check alone is not enough: the editor renders blob previews of its
+    // own, so it passes while the run is still inside the editor. The
+    // editor-dismissed check is what proves we are back in the composer, which
+    // is where the schedule control lives.
     await this.core.verify(
-      async () => (await page.locator('img[src^="blob:"], img[src^="data:"], .share-images, [data-test-id*="image"]').count()) > 0,
-      'image preview rendered'
+      async () =>
+        (await page.locator('img[src^="blob:"], img[src^="data:"], .share-images, [data-test-id*="image"]').count()) > 0 &&
+        (await editorButton().count()) === 0,
+      'image preview rendered and media editor dismissed'
     );
   }
 

@@ -264,8 +264,14 @@ class XAdapter {
     // verify confirms readiness, then a short settle lets the compose machinery
     // (schedule overlay, file input) finish wiring up.
     await page.goto('https://x.com/home', { waitUntil: 'commit' }).catch(() => {});
-    await helpers.sleep(800);
+    // 'commit' resolves as soon as the navigation is committed, long before the
+    // SPA has mounted. Firing the second goto too early races the first and can
+    // strand the page mid-navigation: the editor never appears and the verify
+    // below burns its full timeout. Settling on home first (and again after the
+    // compose goto) is what makes back-to-back posts in a batch reliable.
+    await helpers.sleep(2500);
     await page.goto('https://x.com/compose/post', { waitUntil: 'commit' }).catch(() => {});
+    await helpers.sleep(1500);
     await this.core.verify(async () => {
       for (const sel of X_EDITOR_SELECTORS) {
         // eslint-disable-next-line no-await-in-loop
