@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "tool": {
+    "id": "linkedin-x-scheduler",
+    "name": "LinkedIn + X Scheduler",
+    "platforms": [
+      "linkedin",
+      "x"
+    ]
+  },
+  "mode": "demo",
+  "fixture": "sample-week",
+  "generatedAt": "2026-08-29T00:00:00.000Z",
+  "items": [
+    {
+      "id": "x-single",
+      "platform": "x",
+      "kind": "image",
+      "scheduledAt": "2026-06-09 08:00",
+      "status": "simulated",
+      "steps": [
+        {
+          "id": 1,
+          "label": "validate post",
+          "status": "complete"
+        },
+        {
+          "id": 2,
+          "label": "open composer",
+          "status": "complete"
+        },
+        {
+          "id": 3,
+          "label": "attach media",
+          "status": "complete"
+        },
+        {
+          "id": 4,
+          "label": "set schedule",
+          "status": "complete"
+        },
+        {
+          "id": 5,
+          "label": "verify queue",
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "id": "li-image",
+      "platform": "linkedin",
+      "kind": "image",
+      "scheduledAt": "2026-06-09 09:00",
+      "status": "simulated",
+      "steps": [
+        {
+          "id": 1,
+          "label": "validate post",
+          "status": "complete"
+        },
+        {
+          "id": 2,
+          "label": "open composer",
+          "status": "complete"
+        },
+        {
+          "id": 3,
+          "label": "attach media",
+          "status": "complete"
+        },
+        {
+          "id": 4,
+          "label": "set schedule",
+          "status": "complete"
+        },
+        {
+          "id": 5,
+          "label": "verify queue",
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "id": "x-carousel",
+      "platform": "x",
+      "kind": "carousel",
+      "scheduledAt": "2026-06-10 17:00",
+      "status": "simulated",
+      "steps": [
+        {
+          "id": 1,
+          "label": "validate post",
+          "status": "complete"
+        },
+        {
+          "id": 2,
+          "label": "open composer",
+          "status": "complete"
+        },
+        {
+          "id": 3,
+          "label": "attach media",
+          "status": "complete"
+        },
+        {
+          "id": 4,
+          "label": "set schedule",
+          "status": "complete"
+        },
+        {
+          "id": 5,
+          "label": "verify queue",
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "id": "li-doc",
+      "platform": "linkedin",
+      "kind": "document",
+      "scheduledAt": "2026-06-11 09:00",
+      "status": "simulated",
+      "steps": [
+        {
+          "id": 1,
+          "label": "validate post",
+          "status": "complete"
+        },
+        {
+          "id": 2,
+          "label": "open composer",
+          "status": "complete"
+        },
+        {
+          "id": 3,
+          "label": "attach media",
+          "status": "complete"
+        },
+        {
+          "id": 4,
+          "label": "set schedule",
+          "status": "complete"
+        },
+        {
+          "id": 5,
+          "label": "verify queue",
+          "status": "complete"
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "complete": 4,
+    "failed": 0,
+    "externalWrites": 0
+  }
+}

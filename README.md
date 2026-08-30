@@ -1,6 +1,10 @@
-# linkedin-x-scheduler
+# LinkedIn / X Scheduler
 
 **Bulk-schedule a week of LinkedIn and X (Twitter) posts from your own browser — no API keys, no OAuth, no SaaS.**
+
+![LinkedIn / X Scheduler social preview](site/social-card.svg)
+
+[Try the offline demo](https://caio-felice-cunha.github.io/linkedin-x-scheduler/) · [Read the architecture](./docs/ARCHITECTURE.md) · [Run locally](#quick-start)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)
@@ -11,9 +15,6 @@ times). The tool attaches to your **already-running, already-logged-in Chrome**
 over the Chrome DevTools Protocol, drives each site's real **native Schedule UI**,
 and verifies every post landed in the scheduled queue. It never asks for a
 password, never touches an API, and never opens a native file dialog.
-
-> Proven on a real 13-post week (3 LinkedIn + 5 X singles + 5 four-image X
-> carousels), all scheduled and verified in-queue.
 
 ---
 
@@ -51,6 +52,20 @@ your batch.json  ─►  scheduler  ──CDP──►  your logged-in Chrome  �
 ---
 
 ## Quick start
+
+### Zero-login demo
+
+```bash
+npm install
+npm run demo
+```
+
+This reads the bundled sample batch, uses a deterministic mock adapter, and
+writes `site/demo-report.json`. It never initializes a CDP connection, opens a
+social network, or schedules a post. Open `site/index.html` through a local
+static server to inspect the report viewer.
+
+### Real browser workflow
 
 ### 1. Install
 

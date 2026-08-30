@@ -33,6 +33,7 @@ const { runReschedule } = require('./reschedule');
 const helpers = require('./helpers');
 const connect = require('./connect');
 const config = require('./config');
+const { runDemo } = require('./demo');
 
 /** Three-tier exit codes. */
 const EXIT = Object.freeze({ SUCCESS: 0, VALIDATION_FAILURE: 1, TOOLCHAIN_ERROR: 2 });
@@ -41,6 +42,7 @@ const EXIT = Object.freeze({ SUCCESS: 0, VALIDATION_FAILURE: 1, TOOLCHAIN_ERROR:
 const COMMANDS = Object.freeze({
   run: "Schedule a batch (LIVE only with --live; dry-run otherwise).",
   'dry-run': 'Rehearse a batch with the terminal Schedule click stubbed.',
+  demo: 'Generate a deterministic offline report without Chrome or network access.',
   reschedule: "Change existing X posts' times in place to the manifest's scheduledAt (X only; --live to save).",
   'connect-check': 'Attach to the running Chrome over CDP and report (no scheduling).',
   doctor: 'Environment + CDP connectivity summary (no scheduling).',
@@ -61,6 +63,7 @@ function parseArgs(argv) {
     cdp: null,
     jsonMode: false,
     screenshots: true,
+    output: null,
     helpRequested: false,
   };
   let liveSeen = false;
@@ -78,6 +81,11 @@ function parseArgs(argv) {
       liveSeen = true;
     } else if (arg === '--no-screenshots') {
       opts.screenshots = false;
+    } else if (arg === '--output') {
+      opts.output = argv[i + 1] || null;
+      i += 1;
+    } else if (arg.startsWith('--output=')) {
+      opts.output = arg.slice('--output='.length);
     } else if (arg === '--batch') {
       opts.batch = argv[i + 1] || null;
       i += 1;
@@ -130,10 +138,26 @@ function printHelp() {
   lines.push('  --cdp <url>        CDP endpoint (default http://127.0.0.1:9222).');
   lines.push('  --json             Emit the structured report as JSON.');
   lines.push('  --no-screenshots   Disable per-step screenshots.');
+  lines.push('  --output <path>     Demo report directory (demo command only).');
   lines.push('');
   lines.push('SAFETY: dry-run is the default. A live run needs Chrome started with');
   lines.push('--remote-debugging-port=9222 on a profile logged in to LinkedIn + X (README.md).');
   process.stdout.write(lines.join('\n') + '\n');
+}
+
+async function handleDemo(opts) {
+  try {
+    const result = runDemo({
+      batchPath: opts.batch || 'examples/sample-batch',
+      outputDir: opts.output || 'demo-output',
+    });
+    if (opts.jsonMode) process.stdout.write(JSON.stringify(result.report, null, 2) + '\n');
+    else process.stdout.write(`Offline demo complete: ${result.report.summary.complete}/${result.report.summary.total} simulated.\nReport written → ${result.reportPath}\n`);
+    return EXIT.SUCCESS;
+  } catch (error) {
+    process.stderr.write(`Demo error: ${error.message}\n`);
+    return EXIT.VALIDATION_FAILURE;
+  }
 }
 
 /**
@@ -374,6 +398,9 @@ async function main(argv) {
     }
     return handleRun(opts);
   }
+  if (command === 'demo') {
+    return handleDemo(opts);
+  }
   if (command === 'reschedule') {
     return handleReschedule(opts);
   }
@@ -385,7 +412,7 @@ async function main(argv) {
   return EXIT.VALIDATION_FAILURE;
 }
 
-module.exports = { main, parseArgs, handleRun, handleReschedule, handleConnectCheck, EXIT, COMMANDS };
+module.exports = { main, parseArgs, handleRun, handleReschedule, handleConnectCheck, handleDemo, EXIT, COMMANDS };
 
 if (require.main === module) {
   Promise.resolve()

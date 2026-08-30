@@ -39,10 +39,11 @@
   ],
   "scripts": {
     "schedule": "node src/cli.js",
+    "demo": "node src/cli.js demo --batch examples/sample-batch --output site",
     "dry-run": "node src/cli.js --dry-run",
     "connect-check": "node src/cli.js connect-check",
     "gen-sample": "node examples/sample-batch/generate-placeholders.js",
-    "test": "node tests/scheduler.test.js"
+    "test": "node tests/scheduler.test.js && node --test tests/demo.test.js"
   },
   "dependencies": {
     "playwright-core": "^1.44.0"
