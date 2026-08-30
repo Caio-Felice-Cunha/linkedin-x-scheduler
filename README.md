@@ -4,7 +4,7 @@
 
 ![LinkedIn / X Scheduler social preview](site/social-card.svg)
 
-[Try the offline demo](https://caio-felice-cunha.github.io/linkedin-x-scheduler/) · [Read the architecture](./docs/ARCHITECTURE.md) · [Run locally](#quick-start)
+[Try the demo](https://caio-felice-cunha.github.io/linkedin-x-scheduler/) · [Engineering case](https://caio-felice-cunha.github.io/linkedin-x-scheduler/#architecture) · [View source](https://github.com/Caio-Felice-Cunha/linkedin-x-scheduler) · [Run locally](#quick-start)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 ![Node](https://img.shields.io/badge/node-%E2%89%A518-brightgreen)

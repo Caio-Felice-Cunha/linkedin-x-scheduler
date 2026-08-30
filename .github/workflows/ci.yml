@@ -16,4 +16,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run demo
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:site
       - run: git diff --exit-code -- site/demo-report.json
