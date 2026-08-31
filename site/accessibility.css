@@ -1,0 +1,21 @@
+/* Keep the dense execution report readable and keyboard-safe at every viewport. */
+.items li span {
+  color: var(--muted);
+}
+
+.system-flow {
+  display: flex;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.system-flow span {
+  flex: 1 1 120px;
+}
+
+.code-grid pre,
+.run-card pre {
+  overflow: visible;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -20,7 +20,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: npm run demo
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:all
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+playwright-report/
+test-results/
 
 # Scheduler runtime working directory (state file, run-log, report, screenshots).
 # Created next to a batch.json when you run the tool — never commit your run state.

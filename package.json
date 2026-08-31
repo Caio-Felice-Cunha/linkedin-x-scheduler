@@ -43,10 +43,17 @@
     "dry-run": "node src/cli.js --dry-run",
     "connect-check": "node src/cli.js connect-check",
     "gen-sample": "node examples/sample-batch/generate-placeholders.js",
-    "test": "node tests/scheduler.test.js && node --test tests/demo.test.js"
+    "test": "node tests/scheduler.test.js && node --test tests/demo.test.js",
+    "test:site": "playwright test",
+    "test:all": "npm run demo && npm test && npm run test:site"
   },
   "dependencies": {
     "playwright-core": "^1.44.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.55.0",
+    "http-server": "14.1.1"
   },
   "engines": {
     "node": ">=18"
